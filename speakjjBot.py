@@ -1,15 +1,36 @@
-from aiogram import Bot, Dispatcher, types
-import asyncio
-import json
 import os
+import json
+import asyncio
+import requests
+from flask import Flask, request
 
-TOKEN = "8445773512:AAG6D7dw4Iv4kISueElolcO9O-iPeFDqwzs"
+from aiogram import Bot, Dispatcher, types
+from aiogram.client.default import DefaultBotProperties
 
-bot = Bot(token=TOKEN)
+# ======================
+# CONFIG
+# ======================
+
+TOKEN = os.getenv("BOT_TOKEN")
+RENDER_URL = os.getenv("RENDER_EXTERNAL_URL")
+
+if not TOKEN:
+    raise Exception("BOT_TOKEN is missing")
+
+bot = Bot(
+    token=TOKEN,
+    default=DefaultBotProperties(parse_mode="HTML")
+)
+
 dp = Dispatcher()
+app = Flask(__name__)
 
 USERS_FILE = "users.json"
 
+
+# ======================
+# USERS STORAGE
+# ======================
 
 def load_users():
     try:
@@ -27,16 +48,17 @@ def save_users(users):
 users = load_users()
 
 
+# ======================
+# MAIN LOGIC
+# ======================
+
 @dp.message()
-async def broadcast(message: types.Message):
-    user_id = message.from_user.id
+async def handle_message(message: types.Message):
+    users.add(message.from_user.id)
+    save_users(users)
 
-    if user_id not in users:
-        users.add(user_id)
-        save_users(users)
-
-    for uid in users:
-        if uid == user_id:
+    for uid in list(users):
+        if uid == message.from_user.id:
             continue
 
         try:
@@ -49,10 +71,46 @@ async def broadcast(message: types.Message):
             pass
 
 
+# ======================
+# WEBHOOK ENDPOINT
+# ======================
+
+@app.post(f"/{TOKEN}")
+async def telegram_webhook():
+    data = await request.get_json()
+
+    update = types.Update.model_validate(data)
+    await dp.feed_update(bot, update)
+
+    return "OK"
+
+
+# ======================
+# SET WEBHOOK ON START
+# ======================
+
+async def setup_webhook():
+    url = f"{RENDER_URL}/{TOKEN}"
+
+    requests.get(
+        f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={url}"
+    )
+
+    print("Webhook set to:", url)
+
+
+# ======================
+# RUN SERVER
+# ======================
+
 async def main():
-    print("Bot started")
-    await dp.start_polling(bot)
+    await setup_webhook()
+    print("Bot is running...")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    loop = asyncio.get_event_loop()
+    loop.create_task(main())
+
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
