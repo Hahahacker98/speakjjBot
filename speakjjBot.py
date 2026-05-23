@@ -76,11 +76,13 @@ async def handle_message(message: types.Message):
 # ======================
 
 @app.post(f"/{TOKEN}")
-async def telegram_webhook():
-    data = await request.get_json()
+def telegram_webhook():
+    data = request.get_json()
 
     update = types.Update.model_validate(data)
-    await dp.feed_update(bot, update)
+
+    # безопасный запуск async внутри sync Flask
+    asyncio.run(dp.feed_update(bot, update))
 
     return "OK"
 
@@ -100,17 +102,25 @@ async def setup_webhook():
 
 
 # ======================
-# RUN SERVER
+# RUN SERVER (FIXED)
 # ======================
 
-async def main():
+async def runner():
     await setup_webhook()
     print("Bot is running...")
 
+    port = int(os.environ.get("PORT", 10000))
+
+    from threading import Thread
+
+    def run_flask():
+        app.run(host="0.0.0.0", port=port)
+
+    Thread(target=run_flask, daemon=True).start()
+
+    while True:
+        await asyncio.sleep(3600)
+
 
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.create_task(main())
-
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    asyncio.run(runner())
